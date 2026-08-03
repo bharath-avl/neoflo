@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: visual_agent
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: visual_agent_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://visual_agent:password@db:5432/visual_agent_db
+    depends_on:
+      - db
+    volumes:
+      - ./storage:/app/storage
+
+volumes:
+  pgdata:
