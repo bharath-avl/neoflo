@@ -44,7 +44,7 @@ queryable timeline of activity.
 │  ┌──────────────────────────────────────┐       ┌─────────────────┐│
 │  │  Async Worker (asyncio background)   │──────▶│  Gemini API     ││
 │  │  polls unanalyzed screenshots,       │◀──────│  (vision input) ││
-│  │  writes activity_analysis rows       │       │  gemini-2.0-flash│
+│  │  writes activity_analysis rows       │       │  gemini-2.5-flash│
 │  └──────────────────────────────────────┘       └─────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
 ```
