@@ -13,7 +13,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   api:
-    build: .
+    build: ./server
     ports:
       - "8000:8000"
     environment:
@@ -21,7 +21,7 @@ services:
     depends_on:
       - db
     volumes:
-      - ./storage:/app/storage
+      - ./server/storage:/app/storage
 
 volumes:
   pgdata:
