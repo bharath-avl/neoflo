@@ -6,6 +6,10 @@ let sessionId = null;
 let captureInterval = 30; // default 30s
 let backendUrl = 'http://localhost:8000';
 let blocklist = [];
+let captureTimer = null;
+
+let eventQueue = [];
+let batchTimer = null;
 
 // Initialize state on load
 chrome.storage.local.get(
@@ -19,6 +23,9 @@ chrome.storage.local.get(
     if (result.blocklist) blocklist = result.blocklist;
     
     updateAlarm();
+    if (isMonitoring) {
+        startBatchLoop();
+    }
   }
 );
 
@@ -50,22 +57,23 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 function startSession() {
   sessionId = generateId();
   sessionEventCount = 0;
+  eventQueue = [];
   chrome.storage.local.set({ sessionId, sessionEventCount });
   updateAlarm();
+  startBatchLoop();
   console.log('Session started:', sessionId);
 }
 
 // End current session
 function endSession() {
   console.log('Session ended:', sessionId);
+  flushEventQueue(); // Try to send any remaining
   sessionId = null;
   chrome.storage.local.set({ sessionId: null });
   updateAlarm();
+  stopBatchLoop();
 }
 
-// Ensure session ends on browser close (background script stops when browser closes usually,
-// but MV3 service workers can wake up. We'll rely on the toggle for explicit sessions).
-// Also if the service worker starts up and monitoring is on, it's a new session.
 chrome.runtime.onStartup.addListener(() => {
   chrome.storage.local.get(['isMonitoring'], (result) => {
     if (result.isMonitoring) {
@@ -73,8 +81,6 @@ chrome.runtime.onStartup.addListener(() => {
     }
   });
 });
-
-let captureTimer = null;
 
 // Update screenshot alarm based on state
 function updateAlarm() {
@@ -85,11 +91,7 @@ function updateAlarm() {
   }
 
   if (isMonitoring) {
-    // Keepalive alarm to wake up service worker if it goes to sleep
-    chrome.alarms.create('captureScreenshot', {
-      periodInMinutes: 1
-    });
-    
+    chrome.alarms.create('captureScreenshot', { periodInMinutes: 1 });
     scheduleNextCapture();
   }
 }
@@ -102,18 +104,30 @@ function scheduleNextCapture() {
   
   if (!isMonitoring) return;
   
-  // Use setTimeout for accurate intervals (especially < 60s)
   captureTimer = setTimeout(async () => {
     await captureScreenshot();
     scheduleNextCapture();
   }, captureInterval * 1000);
 }
 
+// Batching loop
+function startBatchLoop() {
+  stopBatchLoop();
+  batchTimer = setInterval(() => {
+    flushEventQueue();
+  }, 10000); // 10 seconds
+}
+
+function stopBatchLoop() {
+  if (batchTimer) {
+    clearInterval(batchTimer);
+    batchTimer = null;
+  }
+}
+
 // Handle alarms
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'captureScreenshot' && isMonitoring) {
-    // Alarm acts as a keepalive. If the service worker was suspended,
-    // the setTimeout would have paused. We wake up and restart the loop.
     scheduleNextCapture();
   }
 });
@@ -131,67 +145,108 @@ function isUrlBlocklisted(url) {
 }
 
 async function captureScreenshot() {
-  if (!isMonitoring) return;
+  if (!isMonitoring || !sessionId) return;
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab || !tab.url) return;
 
-    if (isUrlBlocklisted(tab.url)) {
-      console.log('Skipping screenshot: URL is blocklisted', tab.url);
-      return;
-    }
+    if (isUrlBlocklisted(tab.url)) return;
 
-    // Capture visible tab
     chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }, (dataUrl) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error capturing tab:', chrome.runtime.lastError);
-        return;
-      }
+      if (chrome.runtime.lastError) return;
       if (dataUrl) {
         handleScreenshotCaptured(dataUrl, tab);
       }
     });
   } catch (err) {
-    console.error('Failed to query tabs for screenshot:', err);
+    console.error('Failed to capture screenshot:', err);
   }
 }
 
 function handleScreenshotCaptured(dataUrl, tab) {
-  // In feat/backend-ingest this will POST to backend
-  console.log('Captured screenshot for tab:', tab.url);
-  // Log it as an event for now
+  incrementEventCount();
+  
+  const payload = {
+    session_id: sessionId,
+    tab_url: tab.url,
+    image_base64: dataUrl,
+    timestamp: new Date().toISOString()
+  };
+
+  fetchWithRetry(`${backendUrl}/screenshots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+}
+
+function queueEvent(event) {
+  if (!isMonitoring || !sessionId) return;
+  event.session_id = sessionId;
+  eventQueue.push(event);
   incrementEventCount();
 }
 
-// Listen for messages from content scripts
+function flushEventQueue() {
+  if (eventQueue.length === 0 || !sessionId) return;
+
+  const eventsToSend = [...eventQueue];
+  eventQueue = []; // clear queue
+
+  fetchWithRetry(`${backendUrl}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events: eventsToSend })
+  }).catch((err) => {
+    // If it fails completely after retries, put them back
+    console.error("Failed to send events, putting back in queue", err);
+    eventQueue = [...eventsToSend, ...eventQueue];
+  });
+}
+
+async function fetchWithRetry(url, options, maxRetries = 5) {
+  let delay = 1000;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise(res => setTimeout(res, delay));
+      delay *= 2; // exponential backoff
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CONTENT_EVENT') {
     if (!isMonitoring) return;
     
     const url = message.payload.url;
-    if (isUrlBlocklisted(url)) {
-      return;
-    }
+    if (isUrlBlocklisted(url)) return;
 
-    const event = {
-      ...message.payload,
-      tabId: sender.tab ? sender.tab.id : null
-    };
-
-    // In feat/backend-ingest this will batch and POST to backend
-    console.log('Received event:', event);
-    incrementEventCount();
+    queueEvent({
+      type: message.payload.type,
+      url: message.payload.url,
+      metadata: message.payload.metadata,
+      timestamp: message.payload.ts
+    });
   }
 });
 
-// Listen for tab navigation to log page changes
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (isMonitoring && changeInfo.status === 'complete' && tab.url) {
     if (!isUrlBlocklisted(tab.url)) {
-      console.log('Tab updated:', tab.url);
-      incrementEventCount();
-      // We will record this as a navigation event in backend ingest
+      queueEvent({
+        type: 'navigation',
+        url: tab.url,
+        metadata: { title: tab.title },
+        timestamp: new Date().toISOString()
+      });
     }
   }
 });
@@ -200,9 +255,12 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
   if (isMonitoring) {
     chrome.tabs.get(activeInfo.tabId, (tab) => {
       if (tab && tab.url && !isUrlBlocklisted(tab.url)) {
-        console.log('Tab activated:', tab.url);
-        incrementEventCount();
-        // We will record this as an activation event in backend ingest
+        queueEvent({
+          type: 'activation',
+          url: tab.url,
+          metadata: { title: tab.title },
+          timestamp: new Date().toISOString()
+        });
       }
     });
   }
