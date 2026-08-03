@@ -9,8 +9,8 @@ Returns: {"label": str, "description": str, "category": str, "confidence": float
 """
 
 import json
-import os
 import logging
+import os
 from typing import Protocol
 
 logger = logging.getLogger(__name__)

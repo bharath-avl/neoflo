@@ -1,21 +1,21 @@
+import asyncio
+import base64
+import logging
 import os
 import uuid
-import base64
-import asyncio
-import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
-from typing import List, Any
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from database import engine, Base, get_db
 import models
 import schemas
+from database import Base, engine, get_db
 from worker import worker_loop
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ STORAGE_DIR = os.path.join(os.path.dirname(__file__), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
 
-async def get_or_create_session(session_id: str, db: AsyncSession, timestamp: datetime = None) -> models.Session:
+async def get_or_create_session(session_id: str, db: AsyncSession, timestamp: datetime | None = None) -> models.Session:
     ts = timestamp or datetime.now(timezone.utc)
     result = await db.execute(select(models.Session).where(models.Session.id == session_id))
     session = result.scalars().first()
@@ -70,8 +70,7 @@ async def get_or_create_session(session_id: str, db: AsyncSession, timestamp: da
         if session.last_event_time.tzinfo is None:
             session.last_event_time = session.last_event_time.replace(tzinfo=timezone.utc)
             
-        if ts > session.last_event_time:
-            session.last_event_time = ts
+        session.last_event_time = max(session.last_event_time, ts)
             
     return session
 
@@ -113,7 +112,7 @@ async def create_screenshot(screenshot_data: schemas.ScreenshotCreate, db: Async
             
         image_bytes = base64.b64decode(b64_data)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid base64 data: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid base64 data: {e!s}")
         
     filename = f"{screenshot_data.session_id}_{int(screenshot_data.timestamp.timestamp())}_{uuid.uuid4().hex[:8]}.png"
     filepath = os.path.join(STORAGE_DIR, filename)
@@ -189,7 +188,7 @@ async def get_timeline(session_id: str, db: AsyncSession = Depends(get_db)):
     screenshots = screenshots_result.scalars().all()
 
     # Build timeline entries
-    timeline: List[dict] = []
+    timeline: list[dict] = []
 
     for event in events:
         timeline.append({

@@ -10,10 +10,9 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
-from database import async_session_maker
 import models
+from database import async_session_maker
 from vision_analyzer import get_analyzer
 
 logger = logging.getLogger(__name__)
