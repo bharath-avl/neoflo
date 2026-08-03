@@ -1,18 +1,49 @@
 import os
 import uuid
 import base64
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from typing import List, Any
+
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
+from sqlalchemy.orm import selectinload
 
 from database import engine, Base, get_db
 import models
 import schemas
+from worker import worker_loop
 
-app = FastAPI(title="Visual AI Agent Backend")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup / shutdown lifecycle."""
+    # Create tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Start background worker
+    worker_task = asyncio.create_task(worker_loop())
+    logger.info("Vision analysis worker started.")
+
+    yield
+
+    # Shutdown: cancel worker
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Vision analysis worker stopped.")
+
+
+app = FastAPI(title="Visual AI Agent Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,11 +56,6 @@ app.add_middleware(
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-@app.on_event("startup")
-async def startup_event():
-    async with engine.begin() as conn:
-        # Create tables
-        await conn.run_sync(Base.metadata.create_all)
 
 async def get_or_create_session(session_id: str, db: AsyncSession, timestamp: datetime = None) -> models.Session:
     ts = timestamp or datetime.now(timezone.utc)
@@ -130,4 +156,85 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
         "start_time": session.start_time,
         "last_event_time": session.last_event_time,
         "is_active": is_active
+    }
+
+
+@app.get("/sessions/{session_id}/timeline")
+async def get_timeline(session_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Return a merged timeline of events, screenshots, and their analysis
+    for a given session, ordered by timestamp.
+    """
+    # Verify session exists
+    sess_result = await db.execute(select(models.Session).where(models.Session.id == session_id))
+    session = sess_result.scalars().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Fetch events
+    events_result = await db.execute(
+        select(models.Event)
+        .where(models.Event.session_id == session_id)
+        .order_by(models.Event.timestamp)
+    )
+    events = events_result.scalars().all()
+
+    # Fetch screenshots with eagerly-loaded analysis
+    screenshots_result = await db.execute(
+        select(models.Screenshot)
+        .options(selectinload(models.Screenshot.analysis))
+        .where(models.Screenshot.session_id == session_id)
+        .order_by(models.Screenshot.timestamp)
+    )
+    screenshots = screenshots_result.scalars().all()
+
+    # Build timeline entries
+    timeline: List[dict] = []
+
+    for event in events:
+        timeline.append({
+            "type": "event",
+            "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+            "data": {
+                "id": event.id,
+                "event_type": event.type,
+                "url": event.url,
+                "metadata": event.metadata_,
+            },
+        })
+
+    for screenshot in screenshots:
+        entry: dict[str, Any] = {
+            "type": "screenshot",
+            "timestamp": screenshot.timestamp.isoformat() if screenshot.timestamp else None,
+            "data": {
+                "id": screenshot.id,
+                "tab_url": screenshot.tab_url,
+                "file_path": screenshot.file_path,
+            },
+        }
+        if screenshot.analysis:
+            entry["analysis"] = {
+                "label": screenshot.analysis.label,
+                "description": screenshot.analysis.description,
+                "category": screenshot.analysis.category,
+                "confidence": screenshot.analysis.confidence,
+                "model_used": screenshot.analysis.model_used,
+                "analyzed_at": screenshot.analysis.analyzed_at.isoformat() if screenshot.analysis.analyzed_at else None,
+            }
+        timeline.append(entry)
+
+    # Sort by timestamp
+    def sort_key(item):
+        ts = item.get("timestamp")
+        if ts is None:
+            return ""
+        return ts
+
+    timeline.sort(key=sort_key)
+
+    return {
+        "session_id": session_id,
+        "is_active": (datetime.now(timezone.utc) - (session.last_event_time.replace(tzinfo=timezone.utc) if session.last_event_time.tzinfo is None else session.last_event_time)) < timedelta(minutes=5),
+        "timeline": timeline,
     }
