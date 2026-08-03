@@ -1,16 +1,18 @@
-from pydantic import BaseModel, ConfigDict
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
 
 class EventCreate(BaseModel):
     session_id: str
     type: str
     url: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     timestamp: datetime
 
 class EventBatchCreate(BaseModel):
-    events: List[EventCreate]
+    events: list[EventCreate]
 
 class ScreenshotCreate(BaseModel):
     session_id: str

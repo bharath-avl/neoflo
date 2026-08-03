@@ -1,8 +1,11 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Float
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, String
 from sqlalchemy.orm import relationship
+
 from database import Base
+
 
 class Session(Base):
     __tablename__ = "sessions"

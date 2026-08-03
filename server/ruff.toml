@@ -1,0 +1,6 @@
+[lint]
+# B008: Depends() in defaults is idiomatic FastAPI
+# BLE001: Broad except is intentional in worker error handling loops
+# ASYNC230: Blocking open() is acceptable for small file I/O in this context
+# SIM115: NamedTemporaryFile usage in tests is fine
+ignore = ["B008", "BLE001", "ASYNC230", "SIM115"]

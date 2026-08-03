@@ -1,12 +1,12 @@
-import pytest
-import pytest_asyncio
 import base64
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from database import Base
@@ -30,7 +30,7 @@ def patch_worker():
 
 
 # Must import app AFTER patching worker, but get_db is needed for override
-from main import app, get_db  # noqa: E402
+from main import app, get_db
 
 app.dependency_overrides[get_db] = override_get_db
 
@@ -222,9 +222,11 @@ async def test_worker_processes_unanalyzed_screenshot():
     The worker should pick up a screenshot without an analysis row,
     call analyze(), and write the result to the DB.
     """
+    import os
+    import tempfile
+
     import models
     from worker import process_one_screenshot
-    import tempfile, os
 
     session_id = "worker_session"
     now = datetime.now(timezone.utc)
