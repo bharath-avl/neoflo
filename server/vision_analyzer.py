@@ -30,9 +30,9 @@ class VisionAnalyzer(Protocol):
 class GeminiVisionAnalyzer:
     """Analyzes screenshots using Google Gemini API."""
 
-    def __init__(self, api_key: str | None = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        self.model_name = model
+        self.model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
         self._client = None
 
     def _get_client(self):

@@ -116,6 +116,7 @@ PYTHONPATH=. pytest tests/ -v
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GEMINI_API_KEY` | Yes (for analysis) | — | Google Gemini API key for vision analysis |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Gemini model to use. Google periodically retires models; update this if the default gets retired. See [supported models](https://ai.google.dev/gemini-api/docs/changelog). |
 | `DATABASE_URL` | Yes (production) | `sqlite+aiosqlite:///./test.db` | Async database URL |
 
 ## Privacy & Consent Design
