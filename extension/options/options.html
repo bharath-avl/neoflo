@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Visual AI Agent Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Visual AI Agent Preferences</h1>
+      <p class="subtitle">Configure monitoring and privacy settings</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Connection</h2>
+        <div class="form-group">
+          <label for="backendUrl">Backend URL</label>
+          <input type="url" id="backendUrl" placeholder="http://localhost:8000" />
+          <span class="help-text">The URL of your FastAPI backend server.</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Capture Settings</h2>
+        <div class="form-group">
+          <label for="captureInterval">Screenshot Interval (seconds): <span id="intervalValue">30</span>s</label>
+          <input type="range" id="captureInterval" min="10" max="120" step="5" value="30" />
+          <span class="help-text">How often to capture a screenshot of the active tab.</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Privacy</h2>
+        <div class="form-group">
+          <label for="blocklist">Domain Blocklist (one per line)</label>
+          <textarea id="blocklist" rows="5" placeholder="example.com&#10;bank.com"></textarea>
+          <span class="help-text">Events and screenshots will <strong>never</strong> be captured on these domains.</span>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="saveBtn" class="btn primary">Save Preferences</button>
+        <span id="saveStatus" class="status-msg"></span>
+      </div>
+    </main>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
