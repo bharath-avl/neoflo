@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -33,3 +33,17 @@ class Screenshot(Base):
     timestamp = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     session = relationship("Session", back_populates="screenshots")
+    analysis = relationship("ActivityAnalysis", back_populates="screenshot", uselist=False)
+
+class ActivityAnalysis(Base):
+    __tablename__ = "activity_analysis"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    screenshot_id = Column(String, ForeignKey("screenshots.id"), unique=True, index=True)
+    label = Column(String)
+    description = Column(String)
+    category = Column(String)
+    confidence = Column(Float)
+    model_used = Column(String)
+    analyzed_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    
+    screenshot = relationship("Screenshot", back_populates="analysis")
