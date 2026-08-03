@@ -74,23 +74,47 @@ chrome.runtime.onStartup.addListener(() => {
   });
 });
 
+let captureTimer = null;
+
 // Update screenshot alarm based on state
 function updateAlarm() {
   chrome.alarms.clear('captureScreenshot');
-  if (isMonitoring) {
-    // Chrome alarms have a minimum of 1 minute in packed extensions,
-    // but in development we can use smaller intervals.
-    // periodInMinutes takes minutes, so seconds / 60
-    chrome.alarms.create('captureScreenshot', {
-      periodInMinutes: captureInterval / 60.0
-    });
+  if (captureTimer) {
+    clearTimeout(captureTimer);
+    captureTimer = null;
   }
+
+  if (isMonitoring) {
+    // Keepalive alarm to wake up service worker if it goes to sleep
+    chrome.alarms.create('captureScreenshot', {
+      periodInMinutes: 1
+    });
+    
+    scheduleNextCapture();
+  }
+}
+
+function scheduleNextCapture() {
+  if (captureTimer) {
+    clearTimeout(captureTimer);
+    captureTimer = null;
+  }
+  
+  if (!isMonitoring) return;
+  
+  // Use setTimeout for accurate intervals (especially < 60s)
+  captureTimer = setTimeout(async () => {
+    await captureScreenshot();
+    scheduleNextCapture();
+  }, captureInterval * 1000);
 }
 
 // Handle alarms
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'captureScreenshot' && isMonitoring) {
-    captureScreenshot();
+    // Alarm acts as a keepalive. If the service worker was suspended,
+    // the setTimeout would have paused. We wake up and restart the loop.
+    scheduleNextCapture();
   }
 });
 
@@ -100,7 +124,7 @@ function isUrlBlocklisted(url) {
   try {
     const urlObj = new URL(url);
     const domain = urlObj.hostname.toLowerCase();
-    return blocklist.some(blocked => domain.includes(blocked));
+    return blocklist.some(blocked => domain === blocked || domain.endsWith('.' + blocked));
   } catch (e) {
     return true; // fail safe
   }
